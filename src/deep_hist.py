@@ -1,0 +1,660 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Aug 19 22:49:02 2018
+
+@author: Rui Li
+"""
+
+import os
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from .early_stopping_callback import GetBest
+from keras import backend
+from keras import optimizers
+from keras.models import Model
+from keras.layers import Input, Dense, Dropout, BatchNormalization
+from keras.layers import Activation, Lambda
+from sklearn.preprocessing import StandardScaler
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from keras.models import load_model 
+import csv
+from functools import partial
+import multiprocessing as mp
+import gc
+from scipy.stats import kstest
+
+
+
+class Binning_CDF:
+    
+    def __init__(self, num_cut, hiddenlist, dropout_list, seeding, 
+                 cutpoint_distribution='uniform',
+                 histogram_bin='fixed', loss_model='multi-binary', niter=10):
+        self.num_cut = num_cut
+        self.n_layer = len(hiddenlist)
+        self.hiddenlist = hiddenlist
+        self.seeding = seeding
+        self.histogram_bin = histogram_bin
+        self.loss_model = loss_model
+        self.niter = niter
+        self.cutpoint_distribution = cutpoint_distribution
+        if len(dropout_list) < self.n_layer:
+            self.dropout_list = dropout_list + [0]*(self.n_layer - len(dropout_list))
+        else:
+            self.dropout_list = dropout_list[:self.n_layer]
+    
+    @staticmethod
+    def binary_loss(y_true, y_pred):
+        loss = 0
+        clipped_y_pred = tf.clip_by_value(y_pred, 1e-7, 1 - 1e-7)    
+        loss += -tf.reduce_mean(tf.log(clipped_y_pred) * y_true)
+        loss += -tf.reduce_mean(tf.log(1 - clipped_y_pred) * (1 - y_true))
+        return loss
+    
+    @staticmethod
+    def crps_loss(y_true, y_pred):
+        loss = 0
+        clipped_y_pred = tf.clip_by_value(y_pred, 1e-7, 1 - 1e-7)    
+        loss += tf.reduce_mean(tf.square(1-clipped_y_pred) * y_true)
+        loss += tf.reduce_mean(tf.square(clipped_y_pred) * (1 - y_true))
+        return loss
+    
+    @staticmethod
+    def tf_cumsum(x):
+        from keras import backend
+        return backend.cumsum(x, axis = 1)[:,:-1]
+    
+
+    def DNNclassifier_binary(self, p, num_cut, optimizer, seeding):
+        
+        tf.set_random_seed(seeding)
+        inputs = Input(shape=(p,))
+        opt_name = optimizer.__class__.__name__
+        opt_config = optimizer.get_config()
+        opt_class = getattr(optimizers, opt_name)
+        opt = opt_class(**opt_config)
+        
+        for i, n_neuron in enumerate(self.hiddenlist):
+            if i == 0:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
+            else:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(net)
+            net = Activation(activation = 'elu')(net)
+            net = BatchNormalization()(net)
+            net = Dropout(rate=self.dropout_list[i])(net)
+        
+        softmaxlayer = Dense(num_cut + 1, activation='softmax', 
+                       kernel_initializer = 'he_uniform')(net)
+        
+        output = Lambda(self.tf_cumsum)(softmaxlayer)
+        model = Model(inputs = [inputs], outputs=[output])
+        model.compile(optimizer=opt, loss=self.binary_loss)
+    
+        return model
+    
+    def DNNclassifier_crps(self, p, num_cut, optimizer, seeding):
+        
+        tf.set_random_seed(seeding)
+        inputs = Input(shape=(p,))
+        opt_name = optimizer.__class__.__name__
+        opt_config = optimizer.get_config()
+        opt_class = getattr(optimizers, opt_name)
+        opt = opt_class(**opt_config)
+        
+        for i, n_neuron in enumerate(self.hiddenlist):
+            if i == 0:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
+            else:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(net)
+            net = Activation(activation = 'elu')(net)
+            net = BatchNormalization()(net)
+            net = Dropout(rate=self.dropout_list[i])(net)
+        
+        softmaxlayer = Dense(num_cut + 1, activation='softmax', 
+                       kernel_initializer = 'he_uniform')(net)
+        
+        output = Lambda(self.tf_cumsum)(softmaxlayer)
+        model = Model(inputs = [inputs], outputs=[output])
+        model.compile(optimizer=opt, loss=self.crps_loss)
+    
+        return model
+        
+    def DNNclassifier_multiclass(self, p, num_cut, optimizer, seeding):
+        
+        tf.set_random_seed(seeding)
+        inputs = Input(shape=(p,))
+        opt_name = optimizer.__class__.__name__
+        opt_config = optimizer.get_config()
+        opt_class = getattr(optimizers, opt_name)
+        opt = opt_class(**opt_config)
+        
+        for i, n_neuron in enumerate(self.hiddenlist):
+            if i == 0:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
+            else:
+                net = Dense(n_neuron, kernel_initializer = 'he_uniform')(net)
+            net = Activation(activation = 'elu')(net)
+            net = BatchNormalization()(net)
+            net = Dropout(rate=self.dropout_list[i])(net)
+    
+        output = Dense(num_cut + 1, activation='softmax', 
+                       kernel_initializer = 'he_uniform')(net)
+        model = Model(inputs = [inputs], outputs=[output])
+        model.compile(optimizer=opt, loss='sparse_categorical_crossentropy')
+    
+        return model
+    
+    @staticmethod
+    def cut_generator(ncut, minimum, maximum, seed=1234, random=True, 
+                      empirical_data=None, dist='uniform'):
+        if random:
+            np.random.seed(seed)
+            if dist=='empirical' and (empirical_data is not None):
+                qt_cut = np.random.uniform(0, 100, size=ncut)
+                cut_points = np.percentile(empirical_data, qt_cut)
+            elif dist=='uniform':
+                cut_points = np.random.uniform(minimum, maximum, ncut)
+        else:
+            if dist=='empirical' and (empirical_data is not None):
+                qt_cut = np.linspace(0, 100, num=ncut)
+                cut_points = np.percentile(empirical_data, qt_cut)
+            elif dist=='uniform':
+                cut_points = np.linspace(minimum, maximum, num=ncut) 
+                
+        cut_points = np.sort(cut_points)
+        
+        return cut_points
+        
+    def fit_cdf(self, train_x, train_y, valid_x=None, valid_y=None, ylim=None, 
+                batch_size = 128, epochs = 100, y_margin=0.1, opt_spec='adam',
+                validation_ratio=0.05, shuffle=True, verbose=0, gpu_count=0):
+        
+        train_x = np.array(train_x)
+        train_y = np.array(train_y)
+        
+        if shuffle:
+            np.random.seed(self.seeding)
+            orders = np.random.permutation(train_x.shape[0])
+            train_x = train_x[orders]
+            train_y = train_y[orders]
+            
+        nobs = train_x.shape[0]
+        self.p = train_x.shape[1]  
+
+        if (valid_x is None) or (valid_y is None):
+            train_len = np.ceil(nobs*(1 - validation_ratio)).astype(np.int64)
+            valid_x = train_x[train_len:]
+            valid_y = train_y[train_len:]
+            train_x = train_x[:train_len]
+            train_y = train_y[:train_len]
+            
+        train_y = train_y.reshape(len(train_y), -1)
+        valid_y = valid_y.reshape(len(valid_y), -1)      
+              
+        self.x_scaler = StandardScaler()
+        scaled_TrainX = self.x_scaler.fit_transform(train_x)
+        scaled_ValidX = self.x_scaler.transform(valid_x)            
+        
+        y_min = np.min(train_y)
+        y_max = np.max(train_y)
+        
+        if ylim is None:
+            y_range = y_max - y_min
+            self.ylim = [y_min - y_margin*y_range, y_max + y_margin*y_range]
+        else:
+            self.ylim = ylim.copy()
+
+        if self.ylim[0] >= y_min:
+            self.ylim[0] = y_min
+        
+        if self.ylim[1] <= y_max:
+            self.ylim[1] = y_max
+
+            
+        np.random.seed(self.seeding)
+        seedlist = np.ceil(np.random.uniform(size=self.niter)*1000000).astype(np.int64)
+        
+        if self.num_cut < 1:
+            self.num_cut_int = np.floor(self.num_cut*train_x.shape[0]).astype(np.int64)
+        else:
+            self.num_cut_int = self.num_cut
+             
+        if self.histogram_bin == 'random':
+            self.model_list = []
+            self.random_bin_list = []
+            config = tf.ConfigProto(device_count ={'GPU' : gpu_count})
+            session = tf.Session(config=config)
+            backend.set_session(session)               
+            for i in range(self.niter):          
+                seeding2 = seedlist[i]
+                random_cut = self.cut_generator(self.num_cut_int, self.ylim[0], self.ylim[1], 
+                                                seeding2, random=True, 
+                                                empirical_data=train_y, 
+                                                dist=self.cutpoint_distribution)
+                random_bin  = np.insert(random_cut, 0, self.ylim[0])
+                random_bin  = np.append(random_bin, self.ylim[1])
+                self.random_bin_list.append(random_bin)
+        
+                if self.loss_model == 'multi-class':
+                    Train_label = np.digitize(train_y, random_cut)
+                    Valid_label = np.digitize(valid_y, random_cut)
+                else: # 'multi-binary' or 'multi-crps'
+                    Train_label = np.tile(random_cut, train_y.shape[0]).reshape(train_y.shape[0], -1)
+                    Train_label = (Train_label > train_y).astype(np.int8)
+                    Valid_label = np.tile(random_cut, valid_y.shape[0]).reshape(valid_y.shape[0], -1)
+                    Valid_label = (Valid_label > valid_y).astype(np.int8)  
+                    
+                tf.set_random_seed(seeding2)
+                
+                earlyStop = GetBest(monitor='val_loss', patience = 20, restore_best_weights=True)
+                reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor = 0.2, patience = 7)
+                callback_list = [earlyStop, reduce_lr]
+                
+                if self.loss_model == 'multi-class':
+                    classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_int, opt_spec, seeding2)
+                elif self.loss_model == 'multi-binary':
+                    classmodel = self.DNNclassifier_binary(self.p, self.num_cut_int, opt_spec, seeding2)
+                elif self.loss_model == 'multi-crps':
+                    classmodel = self.DNNclassifier_crps(self.p, self.num_cut_int, opt_spec, seeding2)
+
+                classmodel.fit(scaled_TrainX, Train_label, batch_size = batch_size, 
+                               epochs = epochs, callbacks = callback_list, 
+                               verbose=verbose, validation_data = (scaled_ValidX, Valid_label))
+                
+                self.model_list.append(classmodel)
+
+                print('The {}th iteration is run'.format(i+1))
+                
+        elif self.histogram_bin == 'fixed':
+            self.fixed_bin_model = []
+            ncut = self.num_cut_int + 2
+            fixed_cut = self.cut_generator(ncut, self.ylim[0], self.ylim[1], random=False, 
+                                           empirical_data=train_y, 
+                                           dist=self.cutpoint_distribution)
+            
+            fixed_cut = fixed_cut[1:-1]
+            fixed_bin  = np.insert(fixed_cut, 0, self.ylim[0])
+            fixed_bin  = np.append(fixed_bin, self.ylim[1])            
+
+            self.fixed_bin = fixed_bin
+            
+            if self.loss_model == 'multi-class':
+                Train_label = np.digitize(train_y, fixed_cut)
+                Valid_label = np.digitize(valid_y, fixed_cut)
+            else: # 'multi-binary' or 'multi-crps'
+                Train_label = np.tile(fixed_cut, train_y.shape[0]).reshape(train_y.shape[0], -1)
+                Train_label = (Train_label > train_y).astype(np.int8)
+                Valid_label = np.tile(fixed_cut, valid_y.shape[0]).reshape(valid_y.shape[0], -1)
+                Valid_label = (Valid_label > valid_y).astype(np.int8)  
+            
+            tf.set_random_seed(self.seeding)
+            
+            earlyStop = GetBest(monitor='val_loss', patience = 20, restore_best_weights=True)
+            reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor = 0.2, patience = 7)
+            callback_list = [earlyStop, reduce_lr]
+             
+            if self.loss_model == 'multi-class':
+                classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_int, opt_spec, self.seeding)
+            elif self.loss_model == 'multi-binary':
+                classmodel = self.DNNclassifier_binary(self.p, self.num_cut_int, opt_spec, self.seeding)
+            elif self.loss_model == 'multi-crps':
+                classmodel = self.DNNclassifier_crps(self.p, self.num_cut_int, opt_spec, self.seeding)
+            
+            tf.set_random_seed(self.seeding)
+            config = tf.ConfigProto(device_count = {'GPU' : gpu_count})
+            session = tf.Session(config=config)
+            backend.set_session(session)
+            classmodel.fit(scaled_TrainX, Train_label, batch_size = batch_size, 
+                           epochs = epochs, callbacks = callback_list, 
+                           verbose=verbose, validation_data = (scaled_ValidX, Valid_label))
+                
+            self.fixed_bin_model.append(classmodel)
+            
+
+    def predict_cdf(self, test_x, y_grid=None, ngrid=1000, keep_cdf_matrix=True, 
+                    overwrite_y_grid=True, keep_test_x=True):
+        
+        if y_grid is None:
+            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
+            
+        if not isinstance(test_x, np.ndarray):
+            test_x = np.array(test_x)
+            
+        if test_x.ndim <2:
+            test_x = test_x.reshape(-1, self.p)
+            
+        y_grid = y_grid.flatten()
+        
+        scaled_test_x = self.x_scaler.transform(test_x)
+        
+        TestX_CDF_matrix = np.zeros((test_x.shape[0], len(y_grid)))
+        
+        if keep_test_x:
+            self.test_x = test_x
+        
+        if self.histogram_bin == 'random':
+            for i in range(self.niter):
+                random_bin = self.random_bin_list[i]
+                bin_width  = random_bin[1:] - random_bin[:-1]
+                random_cut = random_bin[1:-1]
+                bin_ids    =  np.digitize(y_grid, random_cut)
+                
+                classmodel = self.model_list[i]
+                output     = classmodel.predict(scaled_test_x)
+        
+                update_weight = 1/(i + 1)
+            
+                for j, nbin in enumerate(bin_ids):
+                    
+                    if y_grid[j] < self.ylim[0]:
+                        cdf_v = 0
+                    elif y_grid[j] > self.ylim[1]:
+                        cdf_v = 1                 
+                    elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
+                        if nbin == 0:
+                            cdf_v = output[:,nbin]*(y_grid[j]-random_bin[nbin])/bin_width[nbin]
+                        elif nbin < self.num_cut_int:
+                            cdf_v = output[:,(nbin-1)] +\
+                            (output[:,nbin] - output[:,(nbin-1)]) * (
+                                    y_grid[j]-random_bin[nbin])/bin_width[nbin]
+                        else:
+                            cdf_v = output[:, (nbin-1)] + \
+                            (1 - output[:,(nbin-1)]) * (
+                                    y_grid[j]-random_bin[nbin])/bin_width[nbin]                        
+                    elif self.loss_model == 'multi-class':
+                        if nbin == 0:
+                            cdf_v = output[:,nbin]*(y_grid[j]-random_bin[nbin])/bin_width[nbin]
+                        else:
+                            cdf_v = output[:,:nbin].sum(axis=1) +\
+                            output[:,nbin]*(y_grid[j]-random_bin[nbin])/bin_width[nbin]                       
+        
+                    TestX_CDF_matrix[:,j] = TestX_CDF_matrix[:,j] + \
+                    (cdf_v - TestX_CDF_matrix[:,j])*update_weight
+                    
+        elif self.histogram_bin == 'fixed':
+            bin_width  = self.fixed_bin[1:] - self.fixed_bin[:-1]
+            fixed_cut = self.fixed_bin[1:-1]
+            bin_ids    =  np.digitize(y_grid, fixed_cut)
+            
+            classmodel = self.fixed_bin_model[0]
+            output     = classmodel.predict(scaled_test_x)
+        
+            for j, nbin in enumerate(bin_ids):
+                
+                if y_grid[j] < self.ylim[0]:
+                    cdf_v = 0
+                elif y_grid[j] > self.ylim[1]:
+                    cdf_v = 1                 
+                elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
+                    if nbin == 0:
+                        cdf_v = output[:,nbin]*(y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
+                    elif nbin < self.num_cut_int:
+                        cdf_v = output[:,(nbin-1)] +\
+                        (output[:,nbin] - output[:,(nbin-1)]) * (
+                                y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
+                    else:
+                        cdf_v = output[:, (nbin-1)] + \
+                        (1 - output[:,(nbin-1)]) * (
+                                y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]                        
+                elif self.loss_model == 'multi-class':
+                    if nbin == 0:
+                        cdf_v = output[:,nbin]*(y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
+                    else:
+                        cdf_v = output[:,:nbin].sum(axis=1) +\
+                        output[:,nbin]*(y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]                       
+    
+                TestX_CDF_matrix[:,j] = cdf_v
+                
+        cdf_df = pd.DataFrame(TestX_CDF_matrix, columns=y_grid)
+        
+        if keep_cdf_matrix:
+            self.TestX_CDF_matrix = TestX_CDF_matrix
+            
+        if overwrite_y_grid:
+            self.y_grid = y_grid
+                       
+        return cdf_df
+    
+    def predict_mean(self, test_x, y_grid=None, ngrid=1000):
+        
+        if y_grid is None:
+            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
+        
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid,
+                                      keep_cdf_matrix=False, overwrite_y_grid=False).values
+                                      
+        grid_width = np.diff(y_grid).mean()
+        
+        test_mean = (cdf_matrix[:,-1]*y_grid[-1] 
+                    - cdf_matrix[:,0]*y_grid[0] 
+                    - cdf_matrix.sum(axis=1)*grid_width)
+        
+        return test_mean     
+    
+    def predict_quantile(self, test_x, quantiles, y_grid=None, ngrid=1000):
+        
+        if y_grid is None:
+            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
+        
+        cdf_df = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid,
+                                      keep_cdf_matrix=False, overwrite_y_grid=False)
+                                      
+        ntest = test_x.shape[0]
+        test_density_gridM = np.tile(y_grid, ntest).reshape(-1, len(y_grid)) 
+        
+        if not isinstance(quantiles, list):
+            if isinstance(quantiles, np.ndarray):
+                quantiles = quantiles.tolist()
+            else:
+                quantiles = [quantiles]
+        
+        test_qtM = self.cdf_to_quantile(cdf_df.values, quantiles, test_density_gridM)
+        
+        test_qt_df = pd.DataFrame(test_qtM, columns=quantiles)
+
+        return test_qt_df 
+
+    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None,
+                 true_cdf_func=None, figsize=(12, 8), title=None):
+        
+        if grid is None:
+            grid = self.y_grid.copy()
+        else:
+            grid = grid.copy()
+
+        if test_x is None:
+            cdf = self.TestX_CDF_matrix[index, :].copy()
+            xval = self.test_x[index, :]
+        else:
+            cdf = self.predict_cdf(test_x, y_grid=grid, 
+                                   keep_cdf_matrix=False, 
+                                   overwrite_y_grid=False,
+                                   keep_test_x=False).values.flatten()
+            xval = test_x
+        
+        cdf = cdf[grid.argsort()]
+        grid.sort()
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax.plot(grid, cdf, label='predicted cdf', lw=3)
+        
+        if true_cdf_func is not None:
+            true_cdf = true_cdf_func(xval, grid)
+            ax.plot(grid, true_cdf, label='true cdf', lw=3)
+            
+        ax.legend(loc='best', prop={'size':16})
+        
+        if test_y is not None:
+            if test_x is None:
+                ax.axvline(x=test_y[index], color='black',  lw=3)
+            else:
+                ax.axvline(x=test_y, color='black', lw=3)
+
+        if title:
+            ax.set_title(title, fontsize=20)
+            tlt = ax.title
+            tlt.set_position([0.5, 1.02])
+            
+        ax.get_xaxis().set_tick_params(direction='out', labelsize=16)
+        ax.get_yaxis().set_tick_params(direction='out', labelsize=16)
+            
+        ax.set_xlim(self.ylim)
+        
+        return ax
+
+    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, window=1, 
+                     true_density_func=None, figsize=(12, 8), title=None):
+        
+        if grid is None:
+            grid = self.y_grid.copy()
+        else:
+            grid = grid.copy()
+        
+        if len(grid) < 2*window + 1:
+            raise ValueError('''The density of the most left {0} and the most right {1} 
+                             grid points won't be plotted, so it requires at least 
+                             {2} grid points to make density plot'''.format(window, window, 2*window + 1))
+
+        if test_x is None:
+            cdf = self.TestX_CDF_matrix[index, :].copy()
+            xval = self.test_x[index, :]
+        else:
+            cdf = self.predict_cdf(test_x, y_grid=grid, 
+                                   keep_cdf_matrix=False, 
+                                   overwrite_y_grid=False,
+                                   keep_test_x=False).values.flatten()
+            xval = test_x
+        
+        cdf = cdf[grid.argsort()]
+        grid.sort()
+        
+        density_binwidth = grid[(2*window):] - grid[:-(2*window)]
+        cdf_diff = cdf[(2*window):] - cdf[:-(2*window)]
+        
+        density = cdf_diff/density_binwidth
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax.plot(grid[window:-window], density, label='predicted density', lw=3)
+        
+        if true_density_func is not None:
+            true_density = true_density_func(xval, grid[window:-window])
+            ax.plot(grid[window:-window], true_density, label='true density', lw=3)
+            
+        ax.legend(loc='best', prop={'size':16})
+            
+        if title:
+            ax.set_title(title, fontsize=20)
+            tlt = ax.title
+            tlt.set_position([0.5, 1.02])
+        
+        if test_y is not None:
+            if test_x is None:
+                ax.axvline(x=test_y[index], color='black',  lw=3)
+            else:
+                ax.axvline(x=test_y, color='black', lw=3)
+            
+        ax.get_xaxis().set_tick_params(direction='out', labelsize=16)
+        ax.get_yaxis().set_tick_params(direction='out', labelsize=16)
+        
+        ax.set_xlim(self.ylim)
+        
+        return ax  
+    
+    def plot_PIT(self, test_x, test_y, density=True, return_cdf_value=False, block_size=None, 
+                 **kwargs):
+        
+        if block_size is None:
+    
+            cdf_df = self.predict_cdf(test_x, y_grid=test_y, keep_cdf_matrix=False, 
+                                      overwrite_y_grid=False)
+            
+            cdf_values = [cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])]
+        else:
+            cdf_values = []
+            for b in range(test_x.shape[0]//block_size + 1):
+                cdf_df = self.predict_cdf(test_x[b*block_size : (b+1)*block_size], 
+                                          y_grid=test_y[b*block_size : (b+1)*block_size], 
+                                          keep_cdf_matrix=False, overwrite_y_grid=False)
+                
+                cdf_values.extend([cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])])
+                
+                del cdf_df
+                gc.collect()
+        
+        fig, ax = plt.subplots(1, 1)
+        ax.hist(cdf_values, density=density, **kwargs)
+        if density:
+            ax.axhline(y=1, color='red')        
+        
+        if return_cdf_value:
+            return ax, cdf_values
+        else:
+            return ax 
+    
+    def ks_test(self, test_x, test_y, density=True, **kwargs):
+        
+        cdf_df = self.predict_cdf(test_x, y_grid=test_y, keep_cdf_matrix=False, 
+                                  overwrite_y_grid=False)
+        
+        cdf_values = [cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])]
+
+        return kstest(cdf_values, 'uniform')
+    
+    def evaluate(self, test_x, test_y, y_grid=None, 
+                 ngrid=1000, quantiles=None, mode='CRPS'):
+        
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid).values
+        ntest = test_x.shape[0]
+        test_density_gridM = np.tile(self.y_grid, ntest).reshape(-1, len(self.y_grid))
+       
+        if mode == 'CRPS':
+            Test_indicator_matrix = np.where((test_y <= test_density_gridM), 1, 0)
+            test_score = np.mean(np.square(cdf_matrix - Test_indicator_matrix))
+        elif mode == 'QuantileLoss' and quantiles is not None:
+            if not isinstance(quantiles, list):
+                if isinstance(quantiles, np.ndarray):
+                    quantiles = quantiles.tolist()
+                else:
+                    quantiles = [quantiles]
+            
+            test_qtM = self.cdf_to_quantile(cdf_matrix, quantiles, test_density_gridM)
+            test_score = self.ave_quant_loss(test_y, test_qtM, quantiles)
+        elif mode == 'RMSE':
+            grid_width = np.diff(self.y_grid).mean()
+            
+            test_mean = (cdf_matrix[:,-1]*self.y_grid[-1] 
+                        - cdf_matrix[:,0]*self.y_grid[0] 
+                        - cdf_matrix.sum(axis=1)*grid_width).reshape(test_y.shape)
+            
+            test_score = np.sqrt(np.mean(np.square(test_y - test_mean)))
+        
+        return test_score
+    
+    @staticmethod
+    def cdf_to_quantile(cdf, quantiles, vseq_qM):
+        nn_quantM = np.zeros((cdf.shape[0], len(quantiles)))
+        for i, q in enumerate(quantiles):
+            cdf_ind = np.argmin(np.abs(cdf-q), axis=1)
+            nn_quantM[:,i] = vseq_qM[np.arange(cdf.shape[0]),cdf_ind]
+    
+        return nn_quantM 
+
+    @staticmethod
+    def ave_quant_loss(testY, qtM, quantiles):
+        testY = testY.ravel()
+        qt_loss = 0
+        for i, qt in enumerate(quantiles):
+            qt_loss += np.sum(np.where(qtM[:,i]>=testY, (1-qt)*np.abs(qtM[:,i]-testY), 
+                     qt*np.abs(qtM[:,i]-testY)))
+            
+        ave_qt_loss = qt_loss/(qtM.shape[0]*qtM.shape[1])
+        
+        return ave_qt_loss     
+        
+
+
+
+        
+        

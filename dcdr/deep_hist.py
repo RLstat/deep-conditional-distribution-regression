@@ -226,7 +226,7 @@ class Binning_CDF:
             self.random_bin_list = []
             config = tf.ConfigProto(device_count ={'GPU' : gpu_count})
             session = tf.Session(config=config)
-            backend.set_session(session)               
+            backend.set_session(session)             
             for i in range(self.niter):          
                 seeding2 = seedlist[i]
                 random_cut = self.cut_generator(self.num_cut_int, self.ylim[0], self.ylim[1], 

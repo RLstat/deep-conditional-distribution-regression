@@ -11,6 +11,8 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from .early_stopping_callback import GetBest
+from .utils import cdf_to_quantile, evaluate_crps, \
+evaluate_quantile_loss, evaluate_rmse, evaluate_coverage
 from keras import backend
 from keras import optimizers
 from keras.models import Model
@@ -18,7 +20,6 @@ from keras.layers import Input, Dense, Dropout, BatchNormalization
 from keras.layers import Activation, Lambda
 from sklearn.preprocessing import StandardScaler
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from keras.models import load_model 
 import csv
 from functools import partial
 import multiprocessing as mp
@@ -166,10 +167,21 @@ class Binning_CDF:
         cut_points = np.sort(cut_points)
         
         return cut_points
+
+    @staticmethod    
+    def cut_combiner(cut_points, train_y):
+        idx = np.digitize(train_y, cut_points)
+        right_idx = np.unique(idx)
+        left_idx = right_idx-1
+        all_valid_idx = np.union1d(left_idx, right_idx)
+        all_valid_idx = all_valid_idx[(all_valid_idx>=0) & (all_valid_idx<len(cut_points))]
+        
+        return cut_points[all_valid_idx]
         
     def fit_cdf(self, train_x, train_y, valid_x=None, valid_y=None, ylim=None, 
                 batch_size = 128, epochs = 100, y_margin=0.1, opt_spec='adam',
-                validation_ratio=0.05, shuffle=True, verbose=0, gpu_count=0):
+                validation_ratio=0.05, shuffle=True, verbose=0, gpu_count=0, 
+                merge_empty_bin=False):
         
         train_x = np.array(train_x)
         train_y = np.array(train_y)
@@ -197,20 +209,20 @@ class Binning_CDF:
         scaled_TrainX = self.x_scaler.fit_transform(train_x)
         scaled_ValidX = self.x_scaler.transform(valid_x)            
         
-        y_min = np.min(train_y)
-        y_max = np.max(train_y)
+        self.y_min = np.min(train_y)
+        self.y_max = np.max(train_y)
         
         if ylim is None:
-            y_range = y_max - y_min
-            self.ylim = [y_min - y_margin*y_range, y_max + y_margin*y_range]
+            self.y_range = self.y_max - self.y_min
+            self.ylim = [self.y_min - y_margin*self.y_range, self.y_max + y_margin*self.y_range]
         else:
             self.ylim = ylim.copy()
 
-        if self.ylim[0] >= y_min:
-            self.ylim[0] = y_min
+        if self.ylim[0] >= self.y_min:
+            self.ylim[0] = self.y_min
         
-        if self.ylim[1] <= y_max:
-            self.ylim[1] = y_max
+        if self.ylim[1] <= self.y_max:
+            self.ylim[1] = self.y_max
 
             
         np.random.seed(self.seeding)
@@ -233,6 +245,10 @@ class Binning_CDF:
                                                 seeding2, random=True, 
                                                 empirical_data=train_y, 
                                                 dist=self.cutpoint_distribution)
+                
+                if merge_empty_bin:
+                    random_cut = self.cut_combiner(random_cut, train_y)
+                    self.num_cut_int = len(random_cut)
                 random_bin  = np.insert(random_cut, 0, self.ylim[0])
                 random_bin  = np.append(random_bin, self.ylim[1])
                 self.random_bin_list.append(random_bin)
@@ -275,6 +291,9 @@ class Binning_CDF:
                                            dist=self.cutpoint_distribution)
             
             fixed_cut = fixed_cut[1:-1]
+            if merge_empty_bin:
+                fixed_cut = self.cut_combiner(fixed_cut, train_y)
+                self.num_cut_int = len(fixed_cut)
             fixed_bin  = np.insert(fixed_cut, 0, self.ylim[0])
             fixed_bin  = np.append(fixed_bin, self.ylim[1])            
 
@@ -313,11 +332,13 @@ class Binning_CDF:
             self.fixed_bin_model.append(classmodel)
             
 
-    def predict_cdf(self, test_x, y_grid=None, ngrid=1000, keep_cdf_matrix=True, 
+    def predict_cdf(self, test_x, y_grid=None, pred_margin=0.1, 
+                    ngrid=1000, keep_cdf_matrix=True, 
                     overwrite_y_grid=True, keep_test_x=True):
         
         if y_grid is None:
-            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
+            pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]
+            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)
             
         if not isinstance(test_x, np.ndarray):
             test_x = np.array(test_x)
@@ -417,12 +438,9 @@ class Binning_CDF:
                        
         return cdf_df
     
-    def predict_mean(self, test_x, y_grid=None, ngrid=1000):
+    def predict_mean(self, test_x, y_grid=None, pred_margin=0.1, ngrid=1000):
         
-        if y_grid is None:
-            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
-        
-        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid,
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
                                       keep_cdf_matrix=False, overwrite_y_grid=False).values
                                       
         grid_width = np.diff(y_grid).mean()
@@ -433,16 +451,13 @@ class Binning_CDF:
         
         return test_mean     
     
-    def predict_quantile(self, test_x, quantiles, y_grid=None, ngrid=1000):
+    def predict_quantile(self, test_x, quantiles, y_grid=None, pred_margin=0.1, ngrid=1000):
         
-        if y_grid is None:
-            y_grid = np.linspace(self.ylim[0], self.ylim[1], num=ngrid)
-        
-        cdf_df = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid,
-                                      keep_cdf_matrix=False, overwrite_y_grid=False)
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
+                                  keep_cdf_matrix=False, overwrite_y_grid=True).values
                                       
         ntest = test_x.shape[0]
-        test_density_gridM = np.tile(y_grid, ntest).reshape(-1, len(y_grid)) 
+        test_density_gridM = np.tile(self.y_grid, ntest).reshape(-1, len(self.y_grid)) 
         
         if not isinstance(quantiles, list):
             if isinstance(quantiles, np.ndarray):
@@ -450,29 +465,26 @@ class Binning_CDF:
             else:
                 quantiles = [quantiles]
         
-        test_qtM = self.cdf_to_quantile(cdf_df.values, quantiles, test_density_gridM)
+        test_qtM = cdf_to_quantile(cdf_matrix, quantiles, test_density_gridM)
         
         test_qt_df = pd.DataFrame(test_qtM, columns=quantiles)
 
         return test_qt_df 
 
-    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None,
+    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1,
                  true_cdf_func=None, figsize=(12, 8), title=None):
         
-        if grid is None:
-            grid = self.y_grid.copy()
-        else:
-            grid = grid.copy()
-
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
             xval = self.test_x[index, :]
+            grid = self.y_grid.copy()
         else:
-            cdf = self.predict_cdf(test_x, y_grid=grid, 
+            cdf = self.predict_cdf(test_x, y_grid=grid, pred_margin=pred_margin,
                                    keep_cdf_matrix=False, 
-                                   overwrite_y_grid=False,
+                                   overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
             xval = test_x
+            grid = self.y_grid.copy()
         
         cdf = cdf[grid.argsort()]
         grid.sort()
@@ -506,26 +518,25 @@ class Binning_CDF:
 
     def plot_density(self, index=0, test_x=None, test_y=None, grid=None, window=1, 
                      true_density_func=None, figsize=(12, 8), title=None):
-        
-        if grid is None:
-            grid = self.y_grid.copy()
-        else:
-            grid = grid.copy()
-        
-        if len(grid) < 2*window + 1:
-            raise ValueError('''The density of the most left {0} and the most right {1} 
-                             grid points won't be plotted, so it requires at least 
-                             {2} grid points to make density plot'''.format(window, window, 2*window + 1))
 
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
             xval = self.test_x[index, :]
+            grid = self.y_grid.copy()
+
         else:
             cdf = self.predict_cdf(test_x, y_grid=grid, 
                                    keep_cdf_matrix=False, 
-                                   overwrite_y_grid=False,
+                                   overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
             xval = test_x
+            grid = self.y_grid.copy()
+            
+            
+        if len(grid) < 2*window + 1:
+            raise ValueError('''The density of the most left {0} and the most right {1} 
+                             grid points won't be plotted, so it requires at least 
+                             {2} grid points to make density plot'''.format(window, window, 2*window + 1))        
         
         cdf = cdf[grid.argsort()]
         grid.sort()
@@ -602,56 +613,24 @@ class Binning_CDF:
 
         return kstest(cdf_values, 'uniform')
     
-    def evaluate(self, test_x, test_y, y_grid=None, 
-                 ngrid=1000, quantiles=None, mode='CRPS'):
+    def evaluate(self, test_x, test_y, y_grid=None, pred_margin=0.1, 
+                 ngrid=1000, quantiles=None, interval=None, mode='CRPS'):
         
-        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid).values
-        ntest = test_x.shape[0]
-        test_density_gridM = np.tile(self.y_grid, ntest).reshape(-1, len(self.y_grid))
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, pred_margin=pred_margin,
+                                      ngrid=ngrid).values
        
         if mode == 'CRPS':
-            Test_indicator_matrix = np.where((test_y <= test_density_gridM), 1, 0)
-            test_score = np.mean(np.square(cdf_matrix - Test_indicator_matrix))
+            test_score = evaluate_crps(cdf_matrix, test_y, self.y_grid)
         elif mode == 'QuantileLoss' and quantiles is not None:
-            if not isinstance(quantiles, list):
-                if isinstance(quantiles, np.ndarray):
-                    quantiles = quantiles.tolist()
-                else:
-                    quantiles = [quantiles]
-            
-            test_qtM = self.cdf_to_quantile(cdf_matrix, quantiles, test_density_gridM)
-            test_score = self.ave_quant_loss(test_y, test_qtM, quantiles)
-        elif mode == 'RMSE':
-            grid_width = np.diff(self.y_grid).mean()
-            
-            test_mean = (cdf_matrix[:,-1]*self.y_grid[-1] 
-                        - cdf_matrix[:,0]*self.y_grid[0] 
-                        - cdf_matrix.sum(axis=1)*grid_width).reshape(test_y.shape)
-            
-            test_score = np.sqrt(np.mean(np.square(test_y - test_mean)))
+            test_score = evaluate_quantile_loss(cdf_matrix, test_y, quantiles, self.y_grid)
+        elif mode == 'RMSE':            
+            test_score = evaluate_rmse(cdf_matrix, test_y, self.y_grid)
+        elif mode == 'Coverage' and interval is not None:
+            test_score = evaluate_coverage(cdf_matrix, test_y, interval, self.y_grid)
         
         return test_score
-    
-    @staticmethod
-    def cdf_to_quantile(cdf, quantiles, vseq_qM):
-        nn_quantM = np.zeros((cdf.shape[0], len(quantiles)))
-        for i, q in enumerate(quantiles):
-            cdf_ind = np.argmin(np.abs(cdf-q), axis=1)
-            nn_quantM[:,i] = vseq_qM[np.arange(cdf.shape[0]),cdf_ind]
-    
-        return nn_quantM 
 
-    @staticmethod
-    def ave_quant_loss(testY, qtM, quantiles):
-        testY = testY.ravel()
-        qt_loss = 0
-        for i, qt in enumerate(quantiles):
-            qt_loss += np.sum(np.where(qtM[:,i]>=testY, (1-qt)*np.abs(qtM[:,i]-testY), 
-                     qt*np.abs(qtM[:,i]-testY)))
-            
-        ave_qt_loss = qt_loss/(qtM.shape[0]*qtM.shape[1])
-        
-        return ave_qt_loss     
+
         
 
 

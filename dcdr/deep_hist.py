@@ -30,12 +30,12 @@ from scipy.stats import kstest
 
 class Binning_CDF:
     
-    def __init__(self, num_cut, hiddenlist, dropout_list, seeding, 
+    def __init__(self, num_cut, hidden_list, dropout_list, seeding, 
                  cutpoint_distribution='uniform',
                  histogram_bin='fixed', loss_model='multi-binary', niter=10):
         self.num_cut = num_cut
-        self.n_layer = len(hiddenlist)
-        self.hiddenlist = hiddenlist
+        self.n_layer = len(hidden_list)
+        self.hidden_list = hidden_list
         self.seeding = seeding
         self.histogram_bin = histogram_bin
         self.loss_model = loss_model
@@ -72,12 +72,15 @@ class Binning_CDF:
         
         tf.set_random_seed(seeding)
         inputs = Input(shape=(p,))
-        opt_name = optimizer.__class__.__name__
-        opt_config = optimizer.get_config()
-        opt_class = getattr(optimizers, opt_name)
-        opt = opt_class(**opt_config)
-        
-        for i, n_neuron in enumerate(self.hiddenlist):
+        if isinstance(optimizer, str):
+            opt = optimizer
+        else:
+            opt_name = optimizer.__class__.__name__
+            opt_config = optimizer.get_config()
+            opt_class = getattr(optimizers, opt_name)
+            opt = opt_class(**opt_config)
+            
+        for i, n_neuron in enumerate(self.hidden_list):
             if i == 0:
                 net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
             else:
@@ -99,12 +102,15 @@ class Binning_CDF:
         
         tf.set_random_seed(seeding)
         inputs = Input(shape=(p,))
-        opt_name = optimizer.__class__.__name__
-        opt_config = optimizer.get_config()
-        opt_class = getattr(optimizers, opt_name)
-        opt = opt_class(**opt_config)
+        if isinstance(optimizer, str):
+            opt = optimizer
+        else:
+            opt_name = optimizer.__class__.__name__
+            opt_config = optimizer.get_config()
+            opt_class = getattr(optimizers, opt_name)
+            opt = opt_class(**opt_config)
         
-        for i, n_neuron in enumerate(self.hiddenlist):
+        for i, n_neuron in enumerate(self.hidden_list):
             if i == 0:
                 net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
             else:
@@ -126,12 +132,15 @@ class Binning_CDF:
         
         tf.set_random_seed(seeding)
         inputs = Input(shape=(p,))
-        opt_name = optimizer.__class__.__name__
-        opt_config = optimizer.get_config()
-        opt_class = getattr(optimizers, opt_name)
-        opt = opt_class(**opt_config)
+        if isinstance(optimizer, str):
+            opt = optimizer
+        else:
+            opt_name = optimizer.__class__.__name__
+            opt_config = optimizer.get_config()
+            opt_class = getattr(optimizers, opt_name)
+            opt = opt_class(**opt_config)
         
-        for i, n_neuron in enumerate(self.hiddenlist):
+        for i, n_neuron in enumerate(self.hidden_list):
             if i == 0:
                 net = Dense(n_neuron, kernel_initializer = 'he_uniform')(inputs)
             else:
@@ -229,9 +238,11 @@ class Binning_CDF:
         seedlist = np.ceil(np.random.uniform(size=self.niter)*1000000).astype(np.int64)
         
         if self.num_cut < 1:
-            self.num_cut_int = np.floor(self.num_cut*train_x.shape[0]).astype(np.int64)
+            self.num_cut_int = np.floor(self.num_cut*nobs).astype(np.int64)
         else:
             self.num_cut_int = self.num_cut
+            
+        self.num_cut_actual = self.num_cut_int
              
         if self.histogram_bin == 'random':
             self.model_list = []
@@ -241,14 +252,14 @@ class Binning_CDF:
             backend.set_session(session)             
             for i in range(self.niter):          
                 seeding2 = seedlist[i]
-                random_cut = self.cut_generator(self.num_cut_int, self.ylim[0], self.ylim[1], 
+                random_cut = self.cut_generator(self.num_cut_actual, self.ylim[0], self.ylim[1], 
                                                 seeding2, random=True, 
                                                 empirical_data=train_y, 
                                                 dist=self.cutpoint_distribution)
                 
                 if merge_empty_bin:
                     random_cut = self.cut_combiner(random_cut, train_y)
-                    self.num_cut_int = len(random_cut)
+                    self.num_cut_actual = len(random_cut)
                 random_bin  = np.insert(random_cut, 0, self.ylim[0])
                 random_bin  = np.append(random_bin, self.ylim[1])
                 self.random_bin_list.append(random_bin)
@@ -269,11 +280,11 @@ class Binning_CDF:
                 callback_list = [earlyStop, reduce_lr]
                 
                 if self.loss_model == 'multi-class':
-                    classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_int, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_actual, opt_spec, seeding2)
                 elif self.loss_model == 'multi-binary':
-                    classmodel = self.DNNclassifier_binary(self.p, self.num_cut_int, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_binary(self.p, self.num_cut_actual, opt_spec, seeding2)
                 elif self.loss_model == 'multi-crps':
-                    classmodel = self.DNNclassifier_crps(self.p, self.num_cut_int, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_crps(self.p, self.num_cut_actual, opt_spec, seeding2)
 
                 classmodel.fit(scaled_TrainX, Train_label, batch_size = batch_size, 
                                epochs = epochs, callbacks = callback_list, 
@@ -285,7 +296,7 @@ class Binning_CDF:
                 
         elif self.histogram_bin == 'fixed':
             self.fixed_bin_model = []
-            ncut = self.num_cut_int + 2
+            ncut = self.num_cut_actual + 2
             fixed_cut = self.cut_generator(ncut, self.ylim[0], self.ylim[1], random=False, 
                                            empirical_data=train_y, 
                                            dist=self.cutpoint_distribution)
@@ -293,7 +304,7 @@ class Binning_CDF:
             fixed_cut = fixed_cut[1:-1]
             if merge_empty_bin:
                 fixed_cut = self.cut_combiner(fixed_cut, train_y)
-                self.num_cut_int = len(fixed_cut)
+                self.num_cut_actual = len(fixed_cut)
             fixed_bin  = np.insert(fixed_cut, 0, self.ylim[0])
             fixed_bin  = np.append(fixed_bin, self.ylim[1])            
 
@@ -315,11 +326,11 @@ class Binning_CDF:
             callback_list = [earlyStop, reduce_lr]
              
             if self.loss_model == 'multi-class':
-                classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_int, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_actual, opt_spec, self.seeding)
             elif self.loss_model == 'multi-binary':
-                classmodel = self.DNNclassifier_binary(self.p, self.num_cut_int, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_binary(self.p, self.num_cut_actual, opt_spec, self.seeding)
             elif self.loss_model == 'multi-crps':
-                classmodel = self.DNNclassifier_crps(self.p, self.num_cut_int, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_crps(self.p, self.num_cut_actual, opt_spec, self.seeding)
             
             tf.set_random_seed(self.seeding)
             config = tf.ConfigProto(device_count = {'GPU' : gpu_count})
@@ -376,7 +387,7 @@ class Binning_CDF:
                     elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
                         if nbin == 0:
                             cdf_v = output[:,nbin]*(y_grid[j]-random_bin[nbin])/bin_width[nbin]
-                        elif nbin < self.num_cut_int:
+                        elif nbin < self.num_cut_actual:
                             cdf_v = output[:,(nbin-1)] +\
                             (output[:,nbin] - output[:,(nbin-1)]) * (
                                     y_grid[j]-random_bin[nbin])/bin_width[nbin]
@@ -411,7 +422,7 @@ class Binning_CDF:
                 elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
                     if nbin == 0:
                         cdf_v = output[:,nbin]*(y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
-                    elif nbin < self.num_cut_int:
+                    elif nbin < self.num_cut_actual:
                         cdf_v = output[:,(nbin-1)] +\
                         (output[:,nbin] - output[:,(nbin-1)]) * (
                                 y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
@@ -441,12 +452,12 @@ class Binning_CDF:
     def predict_mean(self, test_x, y_grid=None, pred_margin=0.1, ngrid=1000):
         
         cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
-                                      keep_cdf_matrix=False, overwrite_y_grid=False).values
+                                      keep_cdf_matrix=False, overwrite_y_grid=True).values
                                       
-        grid_width = np.diff(y_grid).mean()
+        grid_width = np.diff(self.y_grid).mean()
         
-        test_mean = (cdf_matrix[:,-1]*y_grid[-1] 
-                    - cdf_matrix[:,0]*y_grid[0] 
+        test_mean = (cdf_matrix[:,-1]*self.y_grid[-1] 
+                    - cdf_matrix[:,0]*self.y_grid[0] 
                     - cdf_matrix.sum(axis=1)*grid_width)
         
         return test_mean     
@@ -455,9 +466,6 @@ class Binning_CDF:
         
         cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
                                   keep_cdf_matrix=False, overwrite_y_grid=True).values
-                                      
-        ntest = test_x.shape[0]
-        test_density_gridM = np.tile(self.y_grid, ntest).reshape(-1, len(self.y_grid)) 
         
         if not isinstance(quantiles, list):
             if isinstance(quantiles, np.ndarray):
@@ -465,7 +473,7 @@ class Binning_CDF:
             else:
                 quantiles = [quantiles]
         
-        test_qtM = cdf_to_quantile(cdf_matrix, quantiles, test_density_gridM)
+        test_qtM = cdf_to_quantile(cdf_matrix, quantiles, self.y_grid)
         
         test_qt_df = pd.DataFrame(test_qtM, columns=quantiles)
 
@@ -516,8 +524,8 @@ class Binning_CDF:
         
         return ax
 
-    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, window=1, 
-                     true_density_func=None, figsize=(12, 8), title=None):
+    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1, 
+                     window=1, true_density_func=None, figsize=(12, 8), title=None):
 
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
@@ -615,18 +623,23 @@ class Binning_CDF:
     
     def evaluate(self, test_x, test_y, y_grid=None, pred_margin=0.1, 
                  ngrid=1000, quantiles=None, interval=None, mode='CRPS'):
-        
-        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, pred_margin=pred_margin,
-                                      ngrid=ngrid).values
-       
-        if mode == 'CRPS':
-            test_score = evaluate_crps(cdf_matrix, test_y, self.y_grid)
-        elif mode == 'QuantileLoss' and quantiles is not None:
-            test_score = evaluate_quantile_loss(cdf_matrix, test_y, quantiles, self.y_grid)
-        elif mode == 'RMSE':            
-            test_score = evaluate_rmse(cdf_matrix, test_y, self.y_grid)
-        elif mode == 'Coverage' and interval is not None:
-            test_score = evaluate_coverage(cdf_matrix, test_y, interval, self.y_grid)
+                                      
+        if mode == 'QuantileLoss' and quantiles is not None:
+            quantile_matrix = self.predict_quantile(test_x, quantiles,
+                                                    y_grid=y_grid, 
+                                                    pred_margin=pred_margin,
+                                                    ngrid=ngrid).values
+            test_score = evaluate_quantile_loss(quantile_matrix, test_y, quantiles)
+        else:
+            cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, 
+                                          pred_margin=pred_margin,
+                                          ngrid=ngrid).values                   
+            if mode == 'CRPS':
+                test_score = evaluate_crps(cdf_matrix, test_y, self.y_grid)
+            elif mode == 'RMSE':            
+                test_score = evaluate_rmse(cdf_matrix, test_y, self.y_grid)
+            elif mode == 'Coverage' and interval is not None:
+                test_score = evaluate_coverage(cdf_matrix, test_y, interval, self.y_grid)
         
         return test_score
 

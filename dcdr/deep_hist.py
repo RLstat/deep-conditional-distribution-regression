@@ -343,13 +343,18 @@ class Binning_CDF:
             self.fixed_bin_model.append(classmodel)
             
 
-    def predict_cdf(self, test_x, y_grid=None, pred_margin=0.1, 
+    def predict_cdf(self, test_x, y_grid=None, pred_lim=None, pred_margin=0.1, 
                     ngrid=1000, keep_cdf_matrix=True, 
                     overwrite_y_grid=True, keep_test_x=True):
         
         if y_grid is None:
-            pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]
-            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)
+            if pred_lim is None:
+                if pred_margin is None:
+                    pred_lim = self.ylim
+                else:
+                    pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]                
+            
+            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)              
             
         if not isinstance(test_x, np.ndarray):
             test_x = np.array(test_x)
@@ -449,10 +454,11 @@ class Binning_CDF:
                        
         return cdf_df
     
-    def predict_mean(self, test_x, y_grid=None, pred_margin=0.1, ngrid=1000):
+    def predict_mean(self, test_x, y_grid=None, pred_lim=None, pred_margin=0.1, ngrid=1000):
         
-        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
-                                      keep_cdf_matrix=False, overwrite_y_grid=True).values
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_lim=pred_lim,
+                                      pred_margin=pred_margin, keep_cdf_matrix=False, 
+                                      overwrite_y_grid=True).values
                                       
         grid_width = np.diff(self.y_grid).mean()
         
@@ -462,10 +468,11 @@ class Binning_CDF:
         
         return test_mean     
     
-    def predict_quantile(self, test_x, quantiles, y_grid=None, pred_margin=0.1, ngrid=1000):
+    def predict_quantile(self, test_x, quantiles, y_grid=None, pred_lim=None, pred_margin=0.1, ngrid=1000):
         
-        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_margin=pred_margin,
-                                  keep_cdf_matrix=False, overwrite_y_grid=True).values
+        cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, ngrid=ngrid, pred_lim=pred_lim, 
+                                      pred_margin=pred_margin, keep_cdf_matrix=False, 
+                                      overwrite_y_grid=True).values
         
         if not isinstance(quantiles, list):
             if isinstance(quantiles, np.ndarray):
@@ -479,7 +486,7 @@ class Binning_CDF:
 
         return test_qt_df 
 
-    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1,
+    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None, pred_margin=0.1,
                  true_cdf_func=None, figsize=(12, 8), title=None):
         
         if test_x is None:
@@ -487,7 +494,8 @@ class Binning_CDF:
             xval = self.test_x[index, :]
             grid = self.y_grid.copy()
         else:
-            cdf = self.predict_cdf(test_x, y_grid=grid, pred_margin=pred_margin,
+            cdf = self.predict_cdf(test_x, y_grid=grid, pred_lim=pred_lim, 
+                                   pred_margin=pred_margin,
                                    keep_cdf_matrix=False, 
                                    overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
@@ -524,8 +532,9 @@ class Binning_CDF:
         
         return ax
 
-    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1, 
-                     window=1, true_density_func=None, figsize=(12, 8), title=None):
+    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None, 
+                     pred_margin=0.1, window=1, true_density_func=None, 
+                     figsize=(12, 8), title=None):
 
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
@@ -533,7 +542,8 @@ class Binning_CDF:
             grid = self.y_grid.copy()
 
         else:
-            cdf = self.predict_cdf(test_x, y_grid=grid, 
+            cdf = self.predict_cdf(test_x, y_grid=grid, pred_lim=pred_lim, 
+                                   pred_margin=pred_margin,
                                    keep_cdf_matrix=False, 
                                    overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
@@ -626,17 +636,19 @@ class Binning_CDF:
 
         return kstest(cdf_values, 'uniform')
     
-    def evaluate(self, test_x, test_y, y_grid=None, pred_margin=0.1, 
+    def evaluate(self, test_x, test_y, y_grid=None, pred_lim=None, pred_margin=0.1, 
                  ngrid=1000, quantiles=None, interval=None, mode='CRPS'):
                                       
         if mode == 'QuantileLoss' and quantiles is not None:
             quantile_matrix = self.predict_quantile(test_x, quantiles,
                                                     y_grid=y_grid, 
+                                                    pred_lim=pred_lim,
                                                     pred_margin=pred_margin,
                                                     ngrid=ngrid).values
             test_score = evaluate_quantile_loss(quantile_matrix, test_y, quantiles)
         else:
             cdf_matrix = self.predict_cdf(test_x, y_grid=y_grid, 
+                                          pred_lim=pred_lim, 
                                           pred_margin=pred_margin,
                                           ngrid=ngrid).values                   
             if mode == 'CRPS':

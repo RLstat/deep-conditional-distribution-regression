@@ -592,7 +592,12 @@ class Binning_CDF:
             cdf_values = [cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])]
         else:
             cdf_values = []
-            for b in range(test_x.shape[0]//block_size + 1):
+            if test_x.shape[0] % block_size == 0:
+                nblocks = test_x.shape[0]//block_size
+            else:
+                nblocks = test_x.shape[0]//block_size + 1
+                
+            for b in range(nblocks):
                 cdf_df = self.predict_cdf(test_x[b*block_size : (b+1)*block_size], 
                                           y_grid=test_y[b*block_size : (b+1)*block_size], 
                                           keep_cdf_matrix=False, overwrite_y_grid=False)

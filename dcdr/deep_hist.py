@@ -241,8 +241,6 @@ class Binning_CDF:
             self.num_cut_int = np.floor(self.num_cut*nobs).astype(np.int64)
         else:
             self.num_cut_int = self.num_cut
-            
-        self.num_cut_actual = self.num_cut_int
              
         if self.histogram_bin == 'random':
             self.model_list = []
@@ -252,14 +250,15 @@ class Binning_CDF:
             backend.set_session(session)             
             for i in range(self.niter):          
                 seeding2 = seedlist[i]
-                random_cut = self.cut_generator(self.num_cut_actual, self.ylim[0], self.ylim[1], 
+                random_cut = self.cut_generator(self.num_cut_int, self.ylim[0], self.ylim[1], 
                                                 seeding2, random=True, 
                                                 empirical_data=train_y, 
                                                 dist=self.cutpoint_distribution)
                 
                 if merge_empty_bin:
                     random_cut = self.cut_combiner(random_cut, train_y)
-                    self.num_cut_actual = len(random_cut)
+                    
+                num_cut_actual = len(random_cut)
                 random_bin  = np.insert(random_cut, 0, self.ylim[0])
                 random_bin  = np.append(random_bin, self.ylim[1])
                 self.random_bin_list.append(random_bin)
@@ -280,11 +279,11 @@ class Binning_CDF:
                 callback_list = [earlyStop, reduce_lr]
                 
                 if self.loss_model == 'multi-class':
-                    classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_actual, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_multiclass(self.p, num_cut_actual, opt_spec, seeding2)
                 elif self.loss_model == 'multi-binary':
-                    classmodel = self.DNNclassifier_binary(self.p, self.num_cut_actual, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_binary(self.p, num_cut_actual, opt_spec, seeding2)
                 elif self.loss_model == 'multi-crps':
-                    classmodel = self.DNNclassifier_crps(self.p, self.num_cut_actual, opt_spec, seeding2)
+                    classmodel = self.DNNclassifier_crps(self.p, num_cut_actual, opt_spec, seeding2)
 
                 classmodel.fit(scaled_TrainX, Train_label, batch_size = batch_size, 
                                epochs = epochs, callbacks = callback_list, 
@@ -296,7 +295,7 @@ class Binning_CDF:
                 
         elif self.histogram_bin == 'fixed':
             self.fixed_bin_model = []
-            ncut = self.num_cut_actual + 2
+            ncut = self.num_cut_int + 2
             fixed_cut = self.cut_generator(ncut, self.ylim[0], self.ylim[1], random=False, 
                                            empirical_data=train_y, 
                                            dist=self.cutpoint_distribution)
@@ -304,7 +303,7 @@ class Binning_CDF:
             fixed_cut = fixed_cut[1:-1]
             if merge_empty_bin:
                 fixed_cut = self.cut_combiner(fixed_cut, train_y)
-                self.num_cut_actual = len(fixed_cut)
+            num_cut_actual = len(fixed_cut)
             fixed_bin  = np.insert(fixed_cut, 0, self.ylim[0])
             fixed_bin  = np.append(fixed_bin, self.ylim[1])            
 
@@ -326,11 +325,11 @@ class Binning_CDF:
             callback_list = [earlyStop, reduce_lr]
              
             if self.loss_model == 'multi-class':
-                classmodel = self.DNNclassifier_multiclass(self.p, self.num_cut_actual, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_multiclass(self.p, num_cut_actual, opt_spec, self.seeding)
             elif self.loss_model == 'multi-binary':
-                classmodel = self.DNNclassifier_binary(self.p, self.num_cut_actual, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_binary(self.p, num_cut_actual, opt_spec, self.seeding)
             elif self.loss_model == 'multi-crps':
-                classmodel = self.DNNclassifier_crps(self.p, self.num_cut_actual, opt_spec, self.seeding)
+                classmodel = self.DNNclassifier_crps(self.p, num_cut_actual, opt_spec, self.seeding)
             
             tf.set_random_seed(self.seeding)
             config = tf.ConfigProto(device_count = {'GPU' : gpu_count})
@@ -354,7 +353,10 @@ class Binning_CDF:
                 else:
                     pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]                
             
-            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)              
+            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)
+            self.pred_lim = pred_lim
+        else:
+            self.pred_lim = [np.min(y_grid), np.max(y_grid)]             
             
         if not isinstance(test_x, np.ndarray):
             test_x = np.array(test_x)
@@ -376,6 +378,7 @@ class Binning_CDF:
                 random_bin = self.random_bin_list[i]
                 bin_width  = random_bin[1:] - random_bin[:-1]
                 random_cut = random_bin[1:-1]
+                num_cut_actual = len(random_cut)
                 bin_ids    =  np.digitize(y_grid, random_cut)
                 
                 classmodel = self.model_list[i]
@@ -392,7 +395,7 @@ class Binning_CDF:
                     elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
                         if nbin == 0:
                             cdf_v = output[:,nbin]*(y_grid[j]-random_bin[nbin])/bin_width[nbin]
-                        elif nbin < self.num_cut_actual:
+                        elif nbin < num_cut_actual:
                             cdf_v = output[:,(nbin-1)] +\
                             (output[:,nbin] - output[:,(nbin-1)]) * (
                                     y_grid[j]-random_bin[nbin])/bin_width[nbin]
@@ -413,6 +416,7 @@ class Binning_CDF:
         elif self.histogram_bin == 'fixed':
             bin_width  = self.fixed_bin[1:] - self.fixed_bin[:-1]
             fixed_cut = self.fixed_bin[1:-1]
+            num_cut_actual = len(fixed_cut)
             bin_ids    =  np.digitize(y_grid, fixed_cut)
             
             classmodel = self.fixed_bin_model[0]
@@ -427,7 +431,7 @@ class Binning_CDF:
                 elif self.loss_model == 'multi-binary' or self.loss_model == 'multi-crps':
                     if nbin == 0:
                         cdf_v = output[:,nbin]*(y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
-                    elif nbin < self.num_cut_actual:
+                    elif nbin < num_cut_actual:
                         cdf_v = output[:,(nbin-1)] +\
                         (output[:,nbin] - output[:,(nbin-1)]) * (
                                 y_grid[j]-self.fixed_bin[nbin])/bin_width[nbin]
@@ -528,13 +532,14 @@ class Binning_CDF:
         ax.get_xaxis().set_tick_params(direction='out', labelsize=16)
         ax.get_yaxis().set_tick_params(direction='out', labelsize=16)
             
-        ax.set_xlim(self.ylim)
+        ax.set_xlim(self.pred_lim)
         
         return ax
 
     def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None, 
                      pred_margin=0.1, window=1, true_density_func=None, 
-                     figsize=(12, 8), title=None):
+                     figsize=(12, 8), title=None, label=None, xlabel=None,
+                     ylabel=None, figure=None):
 
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
@@ -564,8 +569,15 @@ class Binning_CDF:
         
         density = cdf_diff/density_binwidth
         
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-        ax.plot(grid[window:-window], density, label='predicted density', lw=3)
+        if figure is not None:
+            fig, ax = figure
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+         
+        if label is None:
+            label = 'predicted density'
+            
+        ax.plot(grid[window:-window], density, label=label, lw=3)
         
         if true_density_func is not None:
             true_density = true_density_func(xval, grid[window:-window])
@@ -587,9 +599,14 @@ class Binning_CDF:
         ax.get_xaxis().set_tick_params(direction='out', labelsize=16)
         ax.get_yaxis().set_tick_params(direction='out', labelsize=16)
         
-        ax.set_xlim(self.ylim)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel, fontsize=18)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel, fontsize=18)
         
-        return ax  
+        ax.set_xlim(self.pred_lim)
+        
+        return (fig, ax)  
     
     def plot_PIT(self, test_x, test_y, density=True, return_cdf_value=False, block_size=None, 
                  **kwargs):

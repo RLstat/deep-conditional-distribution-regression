@@ -32,16 +32,25 @@ class QRFCDF(RandomForestQuantileRegressor):
         self.y_min = np.min(train_y)
         self.y_max = np.max(train_y)
         self.y_range = self.y_max - self.y_min
+        self.y_lim = [self.y_min, self.y_max]
         
         self.fit(train_x, train_y)
         
     def predict_cdf(self, test_x, quantiles_grid=None, quantile_lim=[0.00001, 0.99999],
-                    n_quantiles=500, y_grid=None, pred_margin=0.1, ngrid=1000, 
+                    n_quantiles=500, y_grid=None, pred_lim=None, pred_margin=0.1, ngrid=1000, 
                     keep_cdf_matrix=True, overwrite_y_grid=True, keep_test_x=True):
         
         if y_grid is None:
-            self.pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]
-            y_grid = np.linspace(self.pred_lim[0], self.pred_lim[1], num=ngrid)
+            if pred_lim is None:
+                if pred_margin is None:
+                    pred_lim = self.ylim
+                else:
+                    pred_lim = [self.y_min - pred_margin*self.y_range, self.y_max + pred_margin*self.y_range]                
+            
+            y_grid = np.linspace(pred_lim[0], pred_lim[1], num=ngrid)
+            self.pred_lim = pred_lim
+        else:
+            self.pred_lim = [np.min(y_grid), np.max(y_grid)]  
             
         if not isinstance(test_x, np.ndarray):
             test_x = np.array(test_x)
@@ -76,15 +85,16 @@ class QRFCDF(RandomForestQuantileRegressor):
          
         return cdf_df
      
-    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1,
-                 true_cdf_func=None, figsize=(12, 8), title=None):
+    def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None,
+                 pred_margin=0.1, true_cdf_func=None, figsize=(12, 8), title=None):
         
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
             xval = self.test_x[index, :]
             grid = self.y_grid.copy()
         else:
-            cdf = self.predict_cdf(test_x, y_grid=grid, pred_margin=pred_margin,
+            cdf = self.predict_cdf(test_x, y_grid=grid, pred_lim=pred_lim,
+                                   pred_margin=pred_margin,
                                    keep_cdf_matrix=False, 
                                    overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
@@ -122,8 +132,10 @@ class QRFCDF(RandomForestQuantileRegressor):
         return ax
 
          
-    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_margin=0.1, 
-                     window=1, true_density_func=None, figsize=(12, 8), title=None):
+    def plot_density(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None, 
+                     pred_margin=0.1, window=1, true_density_func=None, 
+                     figsize=(12, 8), title=None, label=None, xlabel=None, 
+                     ylabel=None, figure=None):
 
         if test_x is None:
             cdf = self.TestX_CDF_matrix[index, :].copy()
@@ -131,7 +143,8 @@ class QRFCDF(RandomForestQuantileRegressor):
             grid = self.y_grid.copy()
 
         else:
-            cdf = self.predict_cdf(test_x, y_grid=grid, pred_margin=pred_margin,
+            cdf = self.predict_cdf(test_x, y_grid=grid, pred_lim=pred_lim,
+                                   pred_margin=pred_margin,
                                    keep_cdf_matrix=False, 
                                    overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
@@ -152,8 +165,15 @@ class QRFCDF(RandomForestQuantileRegressor):
         
         density = cdf_diff/density_binwidth
         
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
-        ax.plot(grid[window:-window], density, label='predicted density', lw=3)
+        if figure is not None:
+            fig, ax = figure
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+         
+        if label is None:
+            label = 'predicted density'
+            
+        ax.plot(grid[window:-window], density, label=label, lw=3)
         
         if true_density_func is not None:
             true_density = true_density_func(xval, grid[window:-window])
@@ -175,9 +195,14 @@ class QRFCDF(RandomForestQuantileRegressor):
         ax.get_xaxis().set_tick_params(direction='out', labelsize=16)
         ax.get_yaxis().set_tick_params(direction='out', labelsize=16)
         
+        if xlabel is not None:
+            ax.set_xlabel(xlabel, fontsize=18)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel, fontsize=18)
+        
         ax.set_xlim(self.pred_lim)
         
-        return ax          
+        return (fig, ax)           
     
     def predict_quantile(self, test_x, quantiles):
         

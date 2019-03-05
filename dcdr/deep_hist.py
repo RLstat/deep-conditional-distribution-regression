@@ -5,7 +5,6 @@ Created on Sun Aug 19 22:49:02 2018
 @author: Rui Li
 """
 
-import os
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -19,10 +18,7 @@ from keras.models import Model
 from keras.layers import Input, Dense, Dropout, BatchNormalization
 from keras.layers import Activation, Lambda
 from sklearn.preprocessing import StandardScaler
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-import csv
-from functools import partial
-import multiprocessing as mp
+from keras.callbacks import ReduceLROnPlateau
 import gc
 from scipy.stats import kstest
 
@@ -457,6 +453,17 @@ class Binning_CDF:
             self.y_grid = y_grid
                        
         return cdf_df
+    
+    def clear_model_memory(self):
+        if self.histogram_bin == 'random':
+            del self.model_list
+        else:
+            del self.fixed_bin_model
+            
+        backend.clear_session()
+        gc.collect()
+            
+        
     
     def predict_mean(self, test_x, y_grid=None, pred_lim=None, pred_margin=0.1, ngrid=1000):
         

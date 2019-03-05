@@ -11,8 +11,8 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from .early_stopping_callback import GetBest
-from .utils import cdf_to_quantile, evaluate_crps, \
-evaluate_quantile_loss, evaluate_rmse, evaluate_coverage
+from .utils import (cdf_to_quantile, evaluate_monotonicity, evaluate_crps, 
+evaluate_quantile_loss, evaluate_rmse, evaluate_coverage)
 from keras import backend
 from keras import optimizers
 from keras.models import Model
@@ -674,6 +674,10 @@ class Binning_CDF:
                 test_score = evaluate_rmse(cdf_matrix, test_y, self.y_grid)
             elif mode == 'Coverage' and interval is not None:
                 test_score = evaluate_coverage(cdf_matrix, test_y, interval, self.y_grid)
+            elif mode == 'Monotonicity':
+                test_score = evaluate_monotonicity(cdf_matrix, self.y_grid)
+            elif mode == 'Crossing':
+                test_score = evaluate_monotonicity(cdf_matrix, self.y_grid, return_crossing_freq=True)
         
         return test_score
 

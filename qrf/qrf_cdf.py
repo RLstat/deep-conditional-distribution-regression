@@ -11,8 +11,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from skgarden import RandomForestQuantileRegressor
 from dcdr.deep_hist import Binning_CDF
-from dcdr.utils import evaluate_crps, \
-evaluate_quantile_loss, evaluate_rmse, evaluate_coverage, quantile_to_cdf
+from dcdr.utils import (evaluate_crps, evaluate_monotonicity,
+evaluate_quantile_loss, evaluate_rmse, evaluate_coverage, quantile_to_cdf)
 
 class QRFCDF(RandomForestQuantileRegressor):
     
@@ -239,5 +239,9 @@ class QRFCDF(RandomForestQuantileRegressor):
                 test_score = evaluate_rmse(cdf_matrix, test_y, self.y_grid)
             elif mode == 'Coverage' and interval is not None:
                 test_score = evaluate_coverage(cdf_matrix, test_y, interval, self.y_grid)
+            elif mode == 'Monotonicity':
+                test_score = evaluate_monotonicity(cdf_matrix, self.y_grid)
+            elif mode == 'Crossing':
+                test_score = evaluate_monotonicity(cdf_matrix, self.y_grid, return_crossing_freq=True)
         
         return test_score  

@@ -7,7 +7,7 @@ Created on Fri Feb  1 23:15:02 2019
 
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr
 
 def _check_input(input_matrix, y_grid=None):
     if isinstance(input_matrix, pd.DataFrame):
@@ -23,17 +23,26 @@ def _check_input(input_matrix, y_grid=None):
     return output_matrix, y_grid
 
 
-def evaluate_monotonicity(cdf, y_grid=None):
+def evaluate_monotonicity(cdf, y_grid=None, return_crossing_freq=False):
     
     cdf_matrix, y_grid = _check_input(cdf, y_grid)
     nobs = cdf_matrix.shape[0]
     monotonic = []
     
-    for i in range(nobs):
-        spm_cor = spearmanr(cdf_matrix[i,:], y_grid)[0]
-        monotonic.append(spm_cor)
-        
-    return np.mean(monotonic)
+    if return_crossing_freq:
+        diff_matrix = np.diff(cdf_matrix)
+        return np.sum(diff_matrix<0)/np.prod(diff_matrix.shape)
+    else:
+        for i in range(nobs):
+            num_cor = pearsonr(cdf_matrix[i,:], y_grid)[0]
+            denom_cor = pearsonr(np.sort(cdf_matrix[i,:]), np.sort(y_grid))[0]
+            if num_cor != 0:
+                mono = num_cor/denom_cor
+            else:
+                mono = 0
+            monotonic.append(mono)
+            
+        return np.mean(monotonic)
 
 
 def evaluate_coverage(cdf, test_y, interval, y_grid=None):

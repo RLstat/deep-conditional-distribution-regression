@@ -30,7 +30,7 @@ def evaluate_monotonicity(cdf, y_grid=None):
     monotonic = []
     
     for i in range(nobs):
-        spm_cor = spearmanr(cdf_matrix[i,:], y_grid)
+        spm_cor = spearmanr(cdf_matrix[i,:], y_grid)[0]
         monotonic.append(spm_cor)
         
     return np.mean(monotonic)

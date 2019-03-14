@@ -105,12 +105,8 @@ class LogisticRegressionCDF:
             
         fixed_cut  = self.fixed_bin[1:-1]
         bin_ids    =  np.digitize(y_grid, fixed_cut)
-        print(bin_ids.max())
-        print(self.unique_label.max())
-        print(len(self.unique_label))
         
         output = self.lr_model.predict_proba(scaled_test_x)
-        print(output.shape)
         
         for j, nbin in enumerate(bin_ids):
             

@@ -116,7 +116,7 @@ def data_simulator4(ntrain, ntest, p, seeding):
     return TrainX, TrainY, TestX, TestY
 
 
-def _check_seed_exist(csv_file_path, seed_col_name, seeding):
+def check_seed_exist(csv_file_path, seed_col_name, seeding):
     
     if os.path.isfile(csv_file_path):
         result_df = pd.read_csv(csv_file_path)
@@ -128,7 +128,7 @@ def _check_seed_exist(csv_file_path, seed_col_name, seeding):
     return False
 
 
-def _generate_unique_seeds(init_seed, sim_iter):
+def generate_unique_seeds(init_seed, sim_iter):
     np.random.seed(init_seed)
     seedlist = np.ceil(np.random.uniform(
             size=sim_iter)*1000000).astype(np.int32)
@@ -148,13 +148,13 @@ def data_sim_wrapper(ntrain, ntest, p, filename, target_dir, coverage_list,
                      fit_kwargs, y_grid=None, pred_margin=0.1, 
                      ngrid=1000, init_seed=1234, sim_iter=100):
     
-    seedlist = _generate_unique_seeds(init_seed, sim_iter)
+    seedlist = generate_unique_seeds(init_seed, sim_iter)
     
     csv_file_path = os.path.join(target_dir, filename)
     
     for i, seeding in enumerate(seedlist):
         
-        if _check_seed_exist(csv_file_path, 'Random Seed', seeding):
+        if check_seed_exist(csv_file_path, 'Random Seed', seeding):
             continue 
         
         TrainX, TrainY, TestX, TestY = data_generator(ntrain, ntest, p, seeding)

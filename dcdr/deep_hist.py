@@ -462,6 +462,7 @@ class Binning_CDF:
             
         backend.clear_session()
         gc.collect()
+        gc.collect()
             
         
     

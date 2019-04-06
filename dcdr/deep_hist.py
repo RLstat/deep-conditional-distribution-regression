@@ -511,7 +511,10 @@ class Binning_CDF:
                                    keep_cdf_matrix=False, 
                                    overwrite_y_grid=True,
                                    keep_test_x=False).values.flatten()
-            xval = test_x
+            if test_x.ndim > 1:
+                xval = test_x[index,:]
+            else:
+                xval = test_x
             grid = self.y_grid.copy()
         
         cdf = cdf[grid.argsort()]

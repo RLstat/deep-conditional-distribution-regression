@@ -114,9 +114,16 @@ def cdf_to_quantile(cdf, quantiles, y_grid=None):
     
     quantile_ma = np.zeros((cdf.shape[0], len(quantiles)))
     
-    for i, cdf_values in enumerate(cdf_matrix):
-        quantile_ma[i,:] = np.interp(quantiles, cdf_values, y_grid)
-
+    if y_grid.ndim > 1:
+        if y_grid.shape[0] != cdf_matrix.shape[0]:
+            raise ValueError('If y_grid is a two dimensional matrix, ' + 
+                             'it should have same first dimension with cdf')
+        for i, cdf_values in enumerate(cdf_matrix):
+            quantile_ma[i,:] = np.interp(quantiles, cdf_values, y_grid[i,:])
+    else:
+        for i, cdf_values in enumerate(cdf_matrix):
+            quantile_ma[i,:] = np.interp(quantiles, cdf_values, y_grid)        
+            
     return quantile_ma 
  
 

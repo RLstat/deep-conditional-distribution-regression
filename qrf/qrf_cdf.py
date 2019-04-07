@@ -5,14 +5,13 @@ Created on Sat Feb  9 11:36:03 2019
 @author: Rui Li
 """
 
-import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from skgarden import RandomForestQuantileRegressor
-from dcdr.deep_hist import Binning_CDF
 from dcdr.utils import (evaluate_crps, evaluate_monotonicity,
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage, quantile_to_cdf)
+import gc
 
 class QRFCDF(RandomForestQuantileRegressor):
     
@@ -84,6 +83,42 @@ class QRFCDF(RandomForestQuantileRegressor):
         cdf_df = pd.DataFrame(TestX_CDF_matrix, columns=y_grid)
          
         return cdf_df
+    
+    def plot_PIT(self, test_x, test_y, density=True, return_cdf_value=False, block_size=None, 
+                 **kwargs):
+        
+        if block_size is None:
+    
+            cdf_df = self.predict_cdf(test_x, y_grid=test_y, keep_cdf_matrix=False, 
+                                      overwrite_y_grid=False)
+            
+            cdf_values = [cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])]
+        else:
+            cdf_values = []
+            if test_x.shape[0] % block_size == 0:
+                nblocks = test_x.shape[0]//block_size
+            else:
+                nblocks = test_x.shape[0]//block_size + 1
+                
+            for b in range(nblocks):
+                cdf_df = self.predict_cdf(test_x[b*block_size : (b+1)*block_size], 
+                                          y_grid=test_y[b*block_size : (b+1)*block_size], 
+                                          keep_cdf_matrix=False, overwrite_y_grid=False)
+                
+                cdf_values.extend([cdf_df.iloc[i,i] for i in range(cdf_df.shape[0])])
+                
+                del cdf_df
+                gc.collect()
+        
+        fig, ax = plt.subplots(1, 1)
+        ax.hist(cdf_values, density=density, **kwargs)
+        if density:
+            ax.axhline(y=1, color='red')        
+        
+        if return_cdf_value:
+            return ax, cdf_values
+        else:
+            return ax 
      
     def plot_cdf(self, index=0, test_x=None, test_y=None, grid=None, pred_lim=None,
                  pred_margin=0.1, true_cdf_func=None, figsize=(12, 8), title=None):

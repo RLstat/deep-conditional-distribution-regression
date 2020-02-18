@@ -2,7 +2,7 @@
 """
 Created on Sat Feb  9 11:36:03 2019
 
-@author: Rui Li
+@author: RLstat
 """
 
 import numpy as np

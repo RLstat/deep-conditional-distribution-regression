@@ -2,7 +2,7 @@
 """
 Created on Tue Feb  5 00:29:53 2019
 
-@author: Rui Li
+@author: RLstat
 """
 
 import os
@@ -14,14 +14,18 @@ from dcdr.utils import evaluate_crps, \
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage
 
 
-def data_simulator1(ntrain, ntest, p, seeding):
+def data_simulator1(ntrain, ntest, p, seeding, return_b=False, return_mean=False):
     nobs = ntrain + ntest
     np.random.seed(seeding)
     X = np.random.normal(size=(nobs, p))
     b1 = np.random.normal(size=p)
     b2 = np.random.normal(size=p)/5
-    Y = np.matmul(X,b1) + \
-    np.exp(np.matmul(X,b2))*np.random.normal(size=nobs)
+    if not return_mean:
+        Y = np.matmul(X,b1) + \
+        np.exp(np.matmul(X,b2))*np.random.normal(size=nobs)
+    else:
+        Y = np.matmul(X, b1)
+        
     Y = Y.reshape(-1,1)
     
     TrainX = X[:ntrain,:]
@@ -30,17 +34,39 @@ def data_simulator1(ntrain, ntest, p, seeding):
     TestX  = X[ntrain:,:]
     TestY  = Y[ntrain:,:]
     
-    return TrainX, TrainY, TestX, TestY
+    if return_b:
+        return TrainX, TrainY, TestX, TestY, b1, b2
+    else:
+        return TrainX, TrainY, TestX, TestY
 
-def data_simulator2(ntrain, ntest, p, seeding):
+
+def conditional_sample_func1(X, b1, b2, nobs, seeding=1234):
+    
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    
+    np.random.seed(seed=seeding)
+    samples = np.matmul(X,b1) + \
+    np.exp(np.matmul(X,b2))*np.random.normal(size=nobs)  
+    
+    return samples
+
+
+def data_simulator2(ntrain, ntest, p, seeding, return_mean=False):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
     X = np.random.uniform(size=(nobs, p))
     ind = np.random.binomial(1,0.5,size=nobs)
-    Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) + 
-              10*X[:,3] + np.random.normal(scale=1.5, size=nobs))*ind + \
-              (20*np.square((X[:,2] - 0.5)) + 5*X[:,4] + 
-               np.random.normal(size=nobs))*(1 - ind)
+    if not return_mean:
+        Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) + 
+                  10*X[:,3] + np.random.normal(scale=1.5, size=nobs))*ind + \
+                  (20*np.square((X[:,2] - 0.5)) + 5*X[:,4] + 
+                   np.random.normal(size=nobs))*(1 - ind)
+    else:
+        Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) + 
+                  10*X[:,3])*0.5 + \
+                  (20*np.square((X[:,2] - 0.5)) + 5*X[:,4])*0.5
+                  
     Y = Y.reshape(-1,1)
     
     TrainX = X[:ntrain,:]
@@ -63,16 +89,56 @@ def density_func2(X, grid):
     
     rv1 = norm(loc=loc1, scale=scale1)
     rv2 = norm(loc=loc2, scale=scale2)
-    return rv1.pdf(grid)*0.5 + rv2.pdf(grid)*0.5
+    return rv1.pdf(grid)*0.5 + rv2.pdf(grid)*0.5 
+
+def cdf_func2(X, grid):
+    from scipy.stats import norm
+    
+    loc1 = 10*np.sin(2*np.pi*X[0]*X[1]) + 10*X[3]
+    scale1 = 1.5
+    
+    loc2 = 20*np.square((X[2] - 0.5)) + 5*X[4]
+    scale2 = 1
+    
+    rv1 = norm(loc=loc1, scale=scale1)
+    rv2 = norm(loc=loc2, scale=scale2)
+    return rv1.cdf(grid)*0.5 + rv2.cdf(grid)*0.5
+
+def conditional_sample_func2(X, nobs, seeding=1234):
+    from scipy.stats import norm
+    
+    loc1 = 10*np.sin(2*np.pi*X[0]*X[1]) + 10*X[3]
+    scale1 = 1.5
+    
+    loc2 = 20*np.square((X[2] - 0.5)) + 5*X[4]
+    scale2 = 1
+    
+    rv1 = norm(loc=loc1, scale=scale1)
+    rv2 = norm(loc=loc2, scale=scale2)
+    
+    np.random.seed(seed=seeding)
+    ind = np.random.binomial(1,0.5,size=nobs)
+    
+    s1 = rv1.rvs(size=nobs)
+    s2 = rv2.rvs(size=nobs)
+    
+    samples = s1*ind + s2*(1-ind)
+    
+    return samples
 
 
-def data_simulator3(ntrain, ntest, p, seeding):
+def data_simulator3(ntrain, ntest, p, seeding, return_mean=False):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
     X = np.random.uniform(high = 10, size=(nobs, p))
     ind = np.random.binomial(1,0.5,size=nobs)
-    Y = (np.sin(X[:,0]) + np.random.normal(scale=0.3, size=nobs))*ind + \
-    (2*np.sin(1.5*X[:,0] + 1) + np.random.normal(scale=0.8, size=nobs))*(1 - ind)
+    if not return_mean:
+        Y = (np.sin(X[:,0]) + np.random.normal(scale=0.3, size=nobs))*ind + \
+        (2*np.sin(1.5*X[:,0] + 1) + np.random.normal(scale=0.8, size=nobs))*(1 - ind)
+    else:
+        Y = (np.sin(X[:,0]))*0.5 + \
+        (2*np.sin(1.5*X[:,0] + 1))*0.5
+        
     Y = Y.reshape(-1,1)
     
     TrainX = X[:ntrain,:]
@@ -96,14 +162,58 @@ def density_func3(X, grid):
     rv2 = norm(loc=loc2, scale=scale2)
     return rv1.pdf(grid)*0.5 + rv2.pdf(grid)*0.5
 
+def cdf_func3(X, grid):  
+    from scipy.stats import norm
+    
+    loc1 = np.sin(X[0])
+    scale1 = 0.3
+    
+    loc2 = 2*np.sin(1.5*X[0] + 1)
+    scale2 = 0.8
+    
+    rv1 = norm(loc=loc1, scale=scale1)
+    rv2 = norm(loc=loc2, scale=scale2)
+    return rv1.cdf(grid)*0.5 + rv2.cdf(grid)*0.5
 
-def data_simulator4(ntrain, ntest, p, seeding):
+
+def conditional_sample_func3(X, nobs, seeding=1234):
+    from scipy.stats import norm
+    
+    if (not isinstance(X, np.ndarray)) or (not isinstance(X, list)):
+        X = [X]
+        
+    loc1 = np.sin(X[0])
+    scale1 = 0.3
+    
+    loc2 = 2*np.sin(1.5*X[0] + 1)
+    scale2 = 0.8
+    
+    rv1 = norm(loc=loc1, scale=scale1)
+    rv2 = norm(loc=loc2, scale=scale2)
+    
+    np.random.seed(seed=seeding)
+    ind = np.random.binomial(1,0.5,size=nobs)
+    
+    s1 = rv1.rvs(size=nobs)
+    s2 = rv2.rvs(size=nobs)
+    
+    samples = s1*ind + s2*(1-ind)
+    
+    return samples
+
+
+def data_simulator4(ntrain, ntest, p, seeding, return_mean=False):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
     X = np.random.uniform(size=(nobs, p))
-    Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) 
-    + 10*X[:,3] + 20*np.square((X[:,2] - 0.5)) 
-    + 5*X[:,4]) + skewnorm.rvs(-5, size=nobs)
+    if not return_mean:
+        Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) 
+        + 10*X[:,3] + 20*np.square((X[:,2] - 0.5)) 
+        + 5*X[:,4]) + skewnorm.rvs(-5, size=nobs)
+    else:
+        Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) 
+        + 10*X[:,3] + 20*np.square((X[:,2] - 0.5)) 
+        + 5*X[:,4])       
     
     Y = Y.reshape(-1,1)
     
@@ -114,6 +224,25 @@ def data_simulator4(ntrain, ntest, p, seeding):
     TestY  = Y[ntrain:,:]
     
     return TrainX, TrainY, TestX, TestY
+
+def cdf_func4(X, grid):
+    
+    loc1 = (10*np.sin(2*np.pi*X[0]*X[1]) + 10*X[3] + 20*np.square((X[2]-0.5))
+    + 5*X[4])
+    
+    rv = skewnorm(a=-5, loc=loc1)
+    return rv.cdf(grid)
+
+
+def conditional_sample_func4(X, nobs, seeding=1234):
+    
+    loc1 = (10*np.sin(2*np.pi*X[0]*X[1]) + 10*X[3] + 20*np.square((X[2]-0.5))
+    + 5*X[4])
+    
+    np.random.seed(seed=seeding)
+    samples = loc1 + skewnorm.rvs(-5, size=nobs)
+    
+    return samples
 
 
 def check_seed_exist(csv_file_path, seed_col_name, seeding):

@@ -2,7 +2,7 @@
 """
 Created on Mon Aug 20 09:39:57 2018
 
-@author: Rui Li
+@author: RLstat
 
 The code is obtained and modified from 
 https://github.com/keras-team/keras/issues/2768

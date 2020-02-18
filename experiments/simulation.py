@@ -2,7 +2,7 @@
 """
 Created on Thu Mar 14 00:02:32 2019
 
-@author: Rui Li
+@author: RLstat
 """
 
 import os

@@ -63,6 +63,8 @@ for i, seeding in enumerate(seedlist):
         cover_percent = dcdr_model.evaluate(TestX, TestY,interval=interval, mode='Coverage')
         dcdr_cover[ncov].append(cover_percent)
         
+    dcdr_model.clear_model_memory()
+        
     qrf_model = QRFCDF(random_state=seeding, min_samples_split=10, n_estimators=500)
     
     qrf_model.fit_cdf(TrainX, TrainY)

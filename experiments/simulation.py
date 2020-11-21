@@ -28,8 +28,8 @@ hidden_list = [100,100,100]
 dropout_list = [0.5,0.5,0.5]
 histogram_bin = 'fixed'
 loss_model = 'multi-binary'
-sim_iter = 100
-target_dir = 'your-file-directory-to-save'
+sim_iter = 3
+target_dir = 'E:/Work_and_Study/Statistics/NCSU research/Bayesian Probablistic forecast/Paper_writing/Revision_simulation'
 filename = 'simulation_2.csv'
 coverage_list = [[0.05, 0.95]]
 quantiles = np.linspace(0.01, 0.99, num=99)

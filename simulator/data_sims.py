@@ -10,14 +10,24 @@ import numpy as np
 import pandas as pd
 import csv
 from scipy.stats import skewnorm
+from scipy.stats import norm
 from dcdr.utils import evaluate_crps, \
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage
 
+def gen_ar1_corr_matrix(corr, p):
+    return np.array([[np.power(corr, abs(i-j)) for i in range(p)] 
+                      for j in range(p)])
 
-def data_simulator1(ntrain, ntest, p, seeding, return_b=False, return_mean=False):
+def data_simulator1(ntrain, ntest, p, seeding, return_b=False, return_mean=False, 
+                    corr=0):
     nobs = ntrain + ntest
     np.random.seed(seeding)
-    X = np.random.normal(size=(nobs, p))
+    if corr != 0:
+        cov = gen_ar1_corr_matrix(corr, p)
+        X = np.random.multivariate_normal([0]*p, cov, nobs)
+    else:
+        X = np.random.normal(size=(nobs, p))
+
     b1 = np.random.normal(size=p)
     b2 = np.random.normal(size=p)/5
     if not return_mean:
@@ -52,10 +62,17 @@ def conditional_sample_func1(X, b1, b2, nobs, seeding=1234):
     return samples
 
 
-def data_simulator2(ntrain, ntest, p, seeding, return_mean=False):
+def data_simulator2(ntrain, ntest, p, seeding, return_mean=False, corr=0):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
-    X = np.random.uniform(size=(nobs, p))
+    
+    if corr != 0:
+        cov = gen_ar1_corr_matrix(corr, p)
+        mvnorm_x = np.random.multivariate_normal([0]*p, cov, nobs)
+        X = norm.cdf(mvnorm_x)
+    else:
+        X = np.random.uniform(size=(nobs, p))
+    
     ind = np.random.binomial(1,0.5,size=nobs)
     if not return_mean:
         Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) + 
@@ -127,10 +144,18 @@ def conditional_sample_func2(X, nobs, seeding=1234):
     return samples
 
 
-def data_simulator3(ntrain, ntest, p, seeding, return_mean=False):
+def data_simulator3(ntrain, ntest, p, seeding, return_mean=False, corr=0):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
-    X = np.random.uniform(high = 10, size=(nobs, p))
+    
+    if corr != 0:
+        cov = gen_ar1_corr_matrix(corr, p)
+        mvnorm_x = np.random.multivariate_normal([0]*p, cov, nobs)
+        X = norm.cdf(mvnorm_x)
+        X = X*10
+    else:
+        X = np.random.uniform(high=10, size=(nobs, p))
+        
     ind = np.random.binomial(1,0.5,size=nobs)
     if not return_mean:
         Y = (np.sin(X[:,0]) + np.random.normal(scale=0.3, size=nobs))*ind + \
@@ -202,10 +227,17 @@ def conditional_sample_func3(X, nobs, seeding=1234):
     return samples
 
 
-def data_simulator4(ntrain, ntest, p, seeding, return_mean=False):
+def data_simulator4(ntrain, ntest, p, seeding, return_mean=False, corr=0):
     nobs = ntrain + ntest    
     np.random.seed(seeding)
-    X = np.random.uniform(size=(nobs, p))
+    
+    if corr != 0:
+        cov = gen_ar1_corr_matrix(corr, p)
+        mvnorm_x = np.random.multivariate_normal([0]*p, cov, nobs)
+        X = norm.cdf(mvnorm_x)
+    else:
+        X = np.random.uniform(size=(nobs, p))
+        
     if not return_mean:
         Y = (10*np.sin(2*np.pi*X[:,0]*X[:,1]) 
         + 10*X[:,3] + 20*np.square((X[:,2] - 0.5)) 

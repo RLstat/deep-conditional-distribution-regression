@@ -12,13 +12,13 @@ tf.disable_v2_behavior()
 import matplotlib.pyplot as plt
 from .utils import (cdf_to_quantile, evaluate_monotonicity, evaluate_crps, 
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage)
-from tensorflow.keras import backend
-from tensorflow.keras import optimizers
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
-from tensorflow.keras.layers import Activation, Lambda
+from tf.keras import backend
+from tf.keras import optimizers
+from tf.keras.models import Model
+from tf.keras.layers import Input, Dense, Dropout, BatchNormalization
+from tf.keras.layers import Activation, Lambda
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
+from tf.keras.callbacks import ReduceLROnPlateau, EarlyStopping
 import gc
 from scipy.stats import kstest
 

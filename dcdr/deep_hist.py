@@ -7,18 +7,18 @@ Created on Sun Aug 19 22:49:02 2018
 
 import pandas as pd
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import matplotlib.pyplot as plt
-from .early_stopping_callback import GetBest
 from .utils import (cdf_to_quantile, evaluate_monotonicity, evaluate_crps, 
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage)
-from keras import backend
-from keras import optimizers
-from keras.models import Model
-from keras.layers import Input, Dense, Dropout, BatchNormalization
-from keras.layers import Activation, Lambda
+from tensorflow.keras import backend
+from tensorflow.keras import optimizers
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
+from tensorflow.keras.layers import Activation, Lambda
 from sklearn.preprocessing import StandardScaler
-from keras.callbacks import ReduceLROnPlateau
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
 import gc
 from scipy.stats import kstest
 
@@ -60,7 +60,7 @@ class Binning_CDF:
     
     @staticmethod
     def tf_cumsum(x):
-        from keras import backend
+        from tensorflow.keras import backend
         return backend.cumsum(x, axis = 1)[:,:-1]
     
 
@@ -270,7 +270,7 @@ class Binning_CDF:
                     
                 tf.set_random_seed(seeding2)
                 
-                earlyStop = GetBest(monitor='val_loss', patience = 20, restore_best_weights=True)
+                earlyStop = EarlyStopping(monitor='val_loss', patience = 20, restore_best_weights=True)
                 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor = 0.2, patience = 7)
                 callback_list = [earlyStop, reduce_lr]
                 
@@ -316,7 +316,7 @@ class Binning_CDF:
             
             tf.set_random_seed(self.seeding)
             
-            earlyStop = GetBest(monitor='val_loss', patience = 20, restore_best_weights=True)
+            earlyStop = EarlyStopping(monitor='val_loss', patience = 20, restore_best_weights=True)
             reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor = 0.2, patience = 7)
             callback_list = [earlyStop, reduce_lr]
              

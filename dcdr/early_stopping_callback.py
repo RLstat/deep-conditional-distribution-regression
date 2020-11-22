@@ -10,7 +10,7 @@ https://github.com/keras-team/keras/issues/2768
 
 import numpy as np
 import warnings
-from keras.callbacks import Callback
+from tensorflow.keras.callbacks import Callback
 
 class GetBest(Callback):
     """Stop training when a monitored quantity has stopped improving.

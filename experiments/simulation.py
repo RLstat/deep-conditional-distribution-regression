@@ -10,7 +10,9 @@ sys.path.insert(0, '/home/ubuntu/deep-conditional-distribution-regression')
 
 import os
 import csv
+import gc
 import numpy as np
+from keras import backend
 from dcdr.deep_hist import Binning_CDF 
 from qrf.qrf_cdf import QRFCDF
 from logistic.logistic_cdf import LogisticRegressionCDF as LR
@@ -133,6 +135,12 @@ for data_simulator, simulator_setting in simulation_settings:
                         dcdr_cover[ncov].append(cover_percent)
 
                     dcdr_model.clear_model_memory()
+                    
+                    del dcdr_model
+                    backend.clear_session()
+                    gc.collect()
+                    gc.collect()
+                    
                     dcdr_elapsed = default_timer()-dcdr_st
 
                     model_name = '_'.join(['dcdr', loss_model, histogram_bin])
@@ -168,7 +176,11 @@ for data_simulator, simulator_setting in simulation_settings:
 
             for ncov, interval in enumerate(coverage_list):
                 cover_percent = lr_model.evaluate(TestX, TestY, interval=interval, mode='Coverage')
-                lr_cover[ncov].append(cover_percent)   
+                lr_cover[ncov].append(cover_percent)  
+                
+            del lr_model
+            gc.collect()
+            gc.collect()
 
             lr_elapsed = default_timer()-lr_st
 
@@ -198,6 +210,10 @@ for data_simulator, simulator_setting in simulation_settings:
         for ncov, interval in enumerate(coverage_list):
             cover_percent = qrf_model.evaluate(TestX, TestY, interval=interval,mode='Coverage')
             qrf_cover[ncov].append(cover_percent)
+            
+        del qrf_model
+        gc.collect()
+        gc.collect()
 
         qrf_elapsed = default_timer()-qrf_st
 
@@ -210,4 +226,8 @@ for data_simulator, simulator_setting in simulation_settings:
             qrf_cover_results[i].extend(['qrf', qrf_cover[i][0], coverage_list[i], num_cut, seeding, qrf_elapsed])
 
         write_to_csv(csv_file_path, header, qrf_crps_results, qrf_aqtl_results, qrf_cover_results)
+        
+        gc.collect()
+        gc.collect()
+
 

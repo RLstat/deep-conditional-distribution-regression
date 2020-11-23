@@ -12,13 +12,13 @@ tf.disable_v2_behavior()
 import matplotlib.pyplot as plt
 from .utils import (cdf_to_quantile, evaluate_monotonicity, evaluate_crps, 
 evaluate_quantile_loss, evaluate_rmse, evaluate_coverage)
-from tf.keras import backend
-from tf.keras import optimizers
-from tf.keras.models import Model
-from tf.keras.layers import Input, Dense, Dropout, BatchNormalization
-from tf.keras.layers import Activation, Lambda
+from tensorflow.compat.v1.keras import backend
+from tensorflow.compat.v1.keras import optimizers
+from tensorflow.compat.v1.keras.models import Model
+from tensorflow.compat.v1.keras.layers import Input, Dense, Dropout, BatchNormalization
+from tensorflow.compat.v1.keras.layers import Activation, Lambda
 from sklearn.preprocessing import StandardScaler
-from tf.keras.callbacks import ReduceLROnPlateau, EarlyStopping
+from tensorflow.compat.v1.keras.callbacks import ReduceLROnPlateau, EarlyStopping
 import gc
 from scipy.stats import kstest
 
@@ -60,7 +60,7 @@ class Binning_CDF:
     
     @staticmethod
     def tf_cumsum(x):
-        from tensorflow.keras import backend
+        from tensorflow.compat.v1.keras import backend
         return backend.cumsum(x, axis = 1)[:,:-1]
     
 
